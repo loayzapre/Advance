@@ -10,10 +10,11 @@ from scr.vae_bernoulli import GaussianEncoder, BernoulliDecoder
 from scr.vae_model import VAE
 from scr.train import train
 from scr.evaluate import (
-    evaluate_test_elbo,
     collect_aggregate_posterior,
-    sample_prior
+    sample_prior,
+    evaluate_test_elbo_breakdown
 )
+from scr.plots import save_loss_curve
 
 from scr.plots import save_sample_grid, save_recon_grid
 
@@ -25,14 +26,23 @@ def set_seed(seed):
 
 def make_loaders(batch_size=128):
     th = 0.5
-    tfm = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x: (x > th).float().squeeze(0))
-    ])
-    train_ds = datasets.MNIST("data/", train=True, download=True, transform=tfm)
-    test_ds  = datasets.MNIST("data/", train=False, download=True, transform=tfm)
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    test_loader  = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+
+    def binarize(img):
+        x = transforms.functional.to_tensor(img)  # (1,28,28)
+        x = (x > th).float()
+        return x.squeeze(0)                       # (28,28)
+
+    train_ds = datasets.MNIST("data/", train=True, download=True, transform=binarize)
+    test_ds  = datasets.MNIST("data/", train=False, download=True, transform=binarize)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True,
+        num_workers=0, pin_memory=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_ds, batch_size=batch_size, shuffle=False,
+        num_workers=0, pin_memory=True
+    )
     return train_loader, test_loader
 
 def build_model(prior_name, M, device):
@@ -113,9 +123,9 @@ def main():
     os.makedirs(base_dir, exist_ok=True)
 
     priors = ["gaussian", "mog", "flow"]
-    seeds = [0, 1, 2]
+    seeds = [0]
     M = 2 # Latent dimension, M = 2 for visualization
-    epochs = 25
+    epochs = 15
 
     summary = {}
 
@@ -130,30 +140,40 @@ def main():
             os.makedirs(out_dir, exist_ok=True)
 
             opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-            train(model, opt, train_loader, epochs=epochs, device=device)
 
-            test_elbo = evaluate_test_elbo(model, test_loader, device)
-            vals.append(test_elbo)
+            # ---- TRAIN ONCE (and keep losses) ----
+            epoch_losses = train(model, opt, train_loader, epochs=epochs, device=device)
+            save_loss_curve(epoch_losses, out_dir)
 
-            # save model
+            # ---- EVALUATE TEST ELBO (approx log-likelihood) ----
+            # Use more MC samples for a less noisy estimate
+            metrics_eval = evaluate_test_elbo_breakdown(model, test_loader, device, n_mc=10)
+            vals.append(metrics_eval["test_elbo"])
+
+            # ---- SAVE MODEL ----
             torch.save(model.state_dict(), os.path.join(out_dir, "model.pt"))
 
-            # save config/metrics
-            config = {"prior": p, "M": M, "seed": s, "epochs": epochs, "lr": 1e-3, "batch": 128}
+            # ---- SAVE CONFIG / METRICS ----
+            config = {"prior": p, "M": M, "seed": s, "epochs": epochs, "lr": 1e-3, "batch": 128, "test_n_mc": 10}
             with open(os.path.join(out_dir, "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
 
-            metrics = {"test_elbo": float(test_elbo)}
+            metrics = {
+                "test_elbo": float(metrics_eval["test_elbo"]),
+                "test_recon": float(metrics_eval["test_recon"]),
+                "test_kl": float(metrics_eval["test_kl"])
+            }
+
             with open(os.path.join(out_dir, "metrics.json"), "w") as f:
                 json.dump(metrics, f, indent=2)
 
-            # save samples/recons
+            # ---- SAVE SAMPLES / RECONS ----
             save_sample_grid(model, os.path.join(out_dir, "samples.png"), n=8)
             save_recon_grid(model, test_loader, os.path.join(out_dir, "recon.png"), n=8, device=device)
 
-            # Save latent samples for later plotting/analysis
-            agg_z = collect_aggregate_posterior(model, test_loader, device, max_batches=100)  # (N,2)
-            prior_z = sample_prior(model, n_samples=5000)  # (5000,2)
+            # ---- SAVE LATENT SAMPLES ----
+            agg_z = collect_aggregate_posterior(model, test_loader, device, max_batches=100)  # (N,M)
+            prior_z = sample_prior(model, n_samples=5000, device=device)                      # (5000,M)
 
             np.save(os.path.join(out_dir, "agg_posterior_z.npy"), agg_z.numpy())
             np.save(os.path.join(out_dir, "prior_samples_z.npy"), prior_z.numpy())

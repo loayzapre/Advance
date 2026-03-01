@@ -85,11 +85,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_loader, test_loader = make_loaders(batch_size=128)
 
-    prior_name = "gaussian"  # "mog", "flow"
+    prior_name = "mog"  # "mog", "flow", "gaussian"
     M = 2
     model = build_model(prior_name, M, device).to(device)
 
-    ckpt_dir = f"runs/{prior_name}_M{M}"
+    ckpt_dir = f"runs/{prior_name}_M{M}_K10"  # adjust if you changed K or run_name format
     ckpt_path = load_first_checkpoint(model, ckpt_dir, device)
 
     freeze(model)

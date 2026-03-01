@@ -1,4 +1,6 @@
 import torch
+import os, json
+import matplotlib.pyplot as plt
 
 @torch.no_grad()
 def collect_latents_with_labels(model, data_loader, device, max_batches=100, use_mean=True):
@@ -91,4 +93,19 @@ def save_recon_grid(model, data_loader, path, n=8, device=None):
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(path, dpi=150)
+    plt.close()
+
+def save_loss_curve(epoch_losses, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+
+    with open(os.path.join(out_dir, "loss_values.json"), "w") as f:
+        json.dump({"epoch_loss": epoch_losses}, f, indent=2)
+
+    plt.figure()
+    plt.plot(epoch_losses)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss (-ELBO)")
+    plt.title("Training loss per epoch")
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "loss_curve.png"), dpi=150)
     plt.close()

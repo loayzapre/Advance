@@ -4,24 +4,24 @@ This project implements a Variational Autoencoder (VAE) with different priors an
 It includes scripts for training, evaluation, and visualization of the latent space.
 
 ## Project Structure
-Project Structure
-project/
-│
-├── src/
-│   ├── __init__.py
-│   ├── vae_model.py
-│   ├── vae_bernoulli.py
-│   ├── priors.py
-│   ├── flows.py
-│   ├── plots.py
-│   ├── train.py
-│   └── evaluate.py
-│
-├── experiments.py
-├── plot_latent.py
-├── data/
-├── runs/
-└── README.md
+
+    project/
+    │
+    ├── src/
+    │   ├── __init__.py
+    │   ├── vae_model.py
+    │   ├── vae_bernoulli.py
+    │   ├── priors.py
+    │   ├── flows.py
+    │   ├── plots.py
+    │   ├── train.py
+    │   └── evaluate.py
+    │
+    ├── experiments.py
+    ├── plot_latent.py
+    ├── data/
+    ├── runs/
+    └── README.md
 
 src/: Core implementation (model, priors, flows, training utilities).
 
@@ -60,7 +60,7 @@ This will:
 2. Train the VAE
 3. Save logs and outputs inside:
 
-runs/
+    runs/
 
 ## Generating Latent Space Plots
 To visualize the latent space and prior contours:

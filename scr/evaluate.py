@@ -59,3 +59,21 @@ def sample_prior(model, n_samples=1000, device=None):
     if isinstance(z, torch.Tensor):
         z = z.to(device)
     return z.detach().cpu()
+
+@torch.no_grad()
+def evaluate_test_elbo_breakdown(model, data_loader, device, n_mc=10):
+    model.eval()
+    elbo_sum = recon_sum = kl_sum = 0.0
+    n = 0
+    for x, _ in data_loader:
+        x = x.to(device)
+        elbo, recon, kl = model.elbo_terms(x, n_mc=n_mc)
+        elbo_sum += elbo.sum().item()
+        recon_sum += recon.sum().item()
+        kl_sum += kl.sum().item()
+        n += x.size(0)
+    return {
+        "test_elbo": elbo_sum / n,
+        "test_recon": recon_sum / n,
+        "test_kl": kl_sum / n,
+    }

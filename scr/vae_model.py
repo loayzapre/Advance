@@ -25,44 +25,8 @@ class VAE(nn.Module):
         return lp if lp.dim() <= 2 else lp.sum(dim=-1)
 
     def elbo(self, x, n_mc=1):
-        """
-        ELBO(x) = E_q(z|x)[ log p(x|z) + log p(z) - log q(z|x) ]
-        Returns: (B,)
-        """
-        q = self.encoder(x)
-
-        if n_mc == 1:
-            z = q.rsample()                 # (B, M)
-            px = self.decoder(z)
-
-            log_px = px.log_prob(x)         # (B,) or (B,D...)
-            log_pz = self.prior.log_prob(z) # (B,) or (B, ...)
-            log_qz = q.log_prob(z)          # (B,) or (B, ...)
-
-            # reduce to (B,)
-            log_px = log_px.view(log_px.shape[0], -1).sum(dim=1) if log_px.dim() > 1 else log_px
-            log_pz = log_pz.view(log_pz.shape[0], -1).sum(dim=1) if log_pz.dim() > 1 else log_pz
-            log_qz = log_qz.view(log_qz.shape[0], -1).sum(dim=1) if log_qz.dim() > 1 else log_qz
-
-            return log_px + log_pz - log_qz
-
-        # n_mc > 1
-        z = q.rsample((n_mc,))              # (S, B, M)
-        px = self.decoder(z)
-
-        log_px = px.log_prob(x)             # (S,B) or (S,B,D...)
-        log_pz = self.prior.log_prob(z)     # (S,B) or (S,B,...)
-        log_qz = q.log_prob(z)              # (S,B) or (S,B,...)
-
-        # reduce to (S,B)
-        if log_px.dim() > 2:
-            log_px = log_px.view(n_mc, log_px.shape[1], -1).sum(dim=2)
-        if log_pz.dim() > 2:
-            log_pz = log_pz.view(n_mc, log_pz.shape[1], -1).sum(dim=2)
-        if log_qz.dim() > 2:
-            log_qz = log_qz.view(n_mc, log_qz.shape[1], -1).sum(dim=2)
-
-        return (log_px + log_pz - log_qz).mean(dim=0)  # (B,)
+        elbo, _, _ = self.elbo_terms(x, n_mc=n_mc)
+        return elbo
 
     def forward(self, x, n_mc=1):
         return -self.elbo(x, n_mc=n_mc).mean()
@@ -75,3 +39,48 @@ class VAE(nn.Module):
             z = z.to(device)
         px = self.decoder(z)
         return px.sample()
+    
+    def elbo_terms(self, x, n_mc=1):
+        """
+        Returns (elbo, recon, kl) each of shape (B,)
+        recon = E_q[log p(x|z)]
+        kl    = E_q[log q(z|x) - log p(z)]
+        """
+        q = self.encoder(x)
+        B = x.shape[0]
+
+        if n_mc > 1:
+            z = q.rsample((n_mc,))  # (S,B,M)
+            S, B, M = z.shape
+
+            z_flat = z.reshape(S * B, M)
+            x_rep = x.unsqueeze(0).expand(S, *x.shape)
+            x_flat = x_rep.reshape(S * B, *x.shape[1:])
+
+            px = self.decoder(z_flat)
+            log_px = px.log_prob(x_flat)          # (S*B,)
+            recon = log_px.view(S, B).mean(0)     # (B,)
+
+            logq = q.log_prob(z)
+            if logq.dim() > 2:
+                logq = logq.sum(dim=-1)
+            logp = self.prior.log_prob(z)
+            if logp.dim() > 2:
+                logp = logp.sum(dim=-1)
+            kl = (logq - logp).mean(0)            # (B,)
+
+        else:
+            z = q.rsample()                       # (B,M)
+            px = self.decoder(z)
+            recon = px.log_prob(x)                # (B,)
+
+            logq = q.log_prob(z)
+            if logq.dim() > 1:
+                logq = logq.sum(-1)
+            logp = self.prior.log_prob(z)
+            if logp.dim() > 1:
+                logp = logp.sum(-1)
+            kl = logq - logp                      # (B,)
+
+        elbo = recon - kl
+        return elbo, recon, kl
