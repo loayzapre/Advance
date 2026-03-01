@@ -3,12 +3,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
+import matplotlib.pyplot as plt
 
 from scr.priors import GaussianPrior, MixturePrior, FlowPrior
 from scr.vae_bernoulli import GaussianEncoder, BernoulliDecoder
 from scr.vae_model import VAE
 from scr.train import train
-from scr.evaluate import evaluate_test_elbo
+from scr.evaluate import (
+    evaluate_test_elbo,
+    collect_aggregate_posterior,
+    sample_prior
+)
+
+from scr.plots import save_sample_grid, save_recon_grid
 
 def set_seed(seed):
     random.seed(seed)
@@ -51,44 +58,111 @@ def build_model(prior_name, M, device):
     else:
         raise ValueError(f"Unknown prior name: {prior_name}")
 
-    encoder = GaussianEncoder(encoder_net)
+    encoder = GaussianEncoder(encoder_net, latent_dim=M)
     decoder = BernoulliDecoder(decoder_net)
     return VAE(prior, encoder, decoder).to(device)
+
+def sample_grid(model, n=8, device=None, title="Samples"):
+    """
+    Generates an n x n grid of samples from the model prior and decoder.
+    Assumes decoder outputs Bernoulli distribution over (28,28).
+    """
+    model.eval()
+    if device is None:
+        device = next(model.parameters()).device
+
+    x = model.sample(n_samples=n*n)   # should return (n*n, 28, 28) or (n*n, ...)
+    if x.dim() == 4 and x.shape[1] == 1:
+        x = x[:, 0]  # (N,28,28)
+
+    x = x.detach().cpu()
+
+    fig, ax = plt.subplots()
+    big = torch.zeros(n*28, n*28)
+
+    idx = 0
+    for i in range(n):
+        for j in range(n):
+            big[i*28:(i+1)*28, j*28:(j+1)*28] = x[idx]
+            idx += 1
+
+    ax.imshow(big.numpy(), cmap="gray")
+    ax.set_title(title)
+    ax.axis("off")
+    plt.tight_layout()
+    plt.show()
+
+def run_name(prior_name, M, prior_obj=None):
+    if prior_name == "gaussian":
+        return f"gaussian_M{M}"
+    if prior_name == "mog":
+        K = getattr(prior_obj, "K", 10)
+        return f"mog_M{M}_K{K}"
+    if prior_name == "flow":
+        # si guardas n_layers/hidden como attrs en FlowPrior, aquí los lees
+        L = getattr(prior_obj, "n_layers", 4)
+        H = getattr(prior_obj, "hidden", 128)
+        return f"flow_M{M}_L{L}_H{H}"
+    return f"{prior_name}_M{M}"
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_loader, test_loader = make_loaders(batch_size=128)
 
-    os.makedirs("models", exist_ok=True)
+    base_dir = "runs"
+    os.makedirs(base_dir, exist_ok=True)
 
     priors = ["gaussian", "mog", "flow"]
-    seeds = [0, 1]
-    M = 2
+    seeds = [0, 1, 2]
+    M = 2 # Latent dimension, M = 2 for visualization
+    epochs = 25
 
-    results = {}
+    summary = {}
+
     for p in priors:
         vals = []
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        model = build_model("gaussian", M=2, device=device)
-
-        x = torch.rand(4, 28, 28).to(device)
-        x = (x > 0.5).float()
-
         for s in seeds:
             set_seed(s)
+
             model = build_model(p, M, device)
+            run = run_name(p, M, model.prior)
+            out_dir = os.path.join(base_dir, run, f"seed{s}")
+            os.makedirs(out_dir, exist_ok=True)
+
             opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-            train(model, opt, train_loader, epochs=1, device=device)
-            vals.append(evaluate_test_elbo(model, test_loader, device))
-            torch.save(model.state_dict(), f"models/{p}_seed{s}.pt")
+            train(model, opt, train_loader, epochs=epochs, device=device)
 
-        results[p] = {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "all": list(map(float, vals))}
-        print(p, results[p])
+            test_elbo = evaluate_test_elbo(model, test_loader, device)
+            vals.append(test_elbo)
 
-    with open("models/partA_results.json", "w") as f:
-        json.dump(results, f, indent=2)
+            # save model
+            torch.save(model.state_dict(), os.path.join(out_dir, "model.pt"))
 
-if __name__ == "__main__":
+            # save config/metrics
+            config = {"prior": p, "M": M, "seed": s, "epochs": epochs, "lr": 1e-3, "batch": 128}
+            with open(os.path.join(out_dir, "config.json"), "w") as f:
+                json.dump(config, f, indent=2)
+
+            metrics = {"test_elbo": float(test_elbo)}
+            with open(os.path.join(out_dir, "metrics.json"), "w") as f:
+                json.dump(metrics, f, indent=2)
+
+            # save samples/recons
+            save_sample_grid(model, os.path.join(out_dir, "samples.png"), n=8)
+            save_recon_grid(model, test_loader, os.path.join(out_dir, "recon.png"), n=8, device=device)
+
+            # Save latent samples for later plotting/analysis
+            agg_z = collect_aggregate_posterior(model, test_loader, device, max_batches=100)  # (N,2)
+            prior_z = sample_prior(model, n_samples=5000)  # (5000,2)
+
+            np.save(os.path.join(out_dir, "agg_posterior_z.npy"), agg_z.numpy())
+            np.save(os.path.join(out_dir, "prior_samples_z.npy"), prior_z.numpy())
+
+        summary[p] = {"mean": float(np.mean(vals)), "std": float(np.std(vals)), "all": list(map(float, vals))}
+        print(p, summary[p])
+
+    with open(os.path.join(base_dir, "summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+
+if __name__ == "__main__":  
     main()
