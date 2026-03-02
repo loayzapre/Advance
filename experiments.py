@@ -50,21 +50,25 @@ def build_model(prior_name, M, device):
         nn.Flatten(),
         nn.Linear(784, 512),
         nn.ReLU(),
-        nn.Linear(512, 2*M),
+        nn.Linear(512, 512),
+        nn.ReLU(),
+        nn.Linear(512, M*2),
     )
     decoder_net = nn.Sequential(
         nn.Linear(M, 512),
         nn.ReLU(),
+        nn.Linear(512, 512),
+        nn.ReLU(),
         nn.Linear(512, 784),
-        nn.Unflatten(-1, (28, 28)),
+        nn.Unflatten(-1, (28, 28))
     )
 
     if prior_name == "gaussian":
         prior = GaussianPrior(M)
     elif prior_name == "mog":
         prior = MixturePrior(M, K=10)
-    elif prior_name == "flow":
-        prior = FlowPrior(M, n_layers=4, hidden=128)
+    elif prior_name == "flow":  
+        prior = FlowPrior(M, n_layers=4, hidden=256)
     else:
         raise ValueError(f"Unknown prior name: {prior_name}")
 
@@ -117,15 +121,19 @@ def run_name(prior_name, M, prior_obj=None):
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader, test_loader = make_loaders(batch_size=128)
+    batch_s = 64
+
+    train_loader, test_loader = make_loaders(batch_size=batch_s)
 
     base_dir = "runs"
     os.makedirs(base_dir, exist_ok=True)
 
-    priors = ["gaussian", "mog", "flow"]
-    seeds = [0]
+    
+
+    priors = ["flow"] # gaussian, mog, flow
+    seeds = [0, 1, 2]
     M = 2 # Latent dimension, M = 2 for visualization
-    epochs = 15
+    epochs = 50
 
     summary = {}
 
@@ -135,6 +143,7 @@ def main():
             set_seed(s)
 
             model = build_model(p, M, device)
+            print(p, type(model.prior), getattr(model.prior, "n_layers", None))
             run = run_name(p, M, model.prior)
             out_dir = os.path.join(base_dir, run, f"seed{s}")
             os.makedirs(out_dir, exist_ok=True)
@@ -154,7 +163,7 @@ def main():
             torch.save(model.state_dict(), os.path.join(out_dir, "model.pt"))
 
             # ---- SAVE CONFIG / METRICS ----
-            config = {"prior": p, "M": M, "seed": s, "epochs": epochs, "lr": 1e-3, "batch": 128, "test_n_mc": 10}
+            config = {"prior": p, "M": M, "seed": s, "epochs": epochs, "lr": 1e-3, "batch": batch_s, "test_n_mc": 10}
             with open(os.path.join(out_dir, "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
 
@@ -172,7 +181,7 @@ def main():
             save_recon_grid(model, test_loader, os.path.join(out_dir, "recon.png"), n=8, device=device)
 
             # ---- SAVE LATENT SAMPLES ----
-            agg_z = collect_aggregate_posterior(model, test_loader, device, max_batches=100)  # (N,M)
+            agg_z = collect_aggregate_posterior(model, test_loader, device, max_batches=30)  # (N,M)
             prior_z = sample_prior(model, n_samples=5000, device=device)                      # (5000,M)
 
             np.save(os.path.join(out_dir, "agg_posterior_z.npy"), agg_z.numpy())

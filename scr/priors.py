@@ -36,7 +36,7 @@ class MixturePrior(nn.Module):
 
         self.logits = nn.Parameter(torch.zeros(K))
         self.loc = nn.Parameter(torch.randn(K, M) * 0.05)
-        self.log_scale = nn.Parameter(torch.zeros(K, M))
+        self.log_scale = nn.Parameter(torch.full((K, M), -1.0))  # std ≈ 0.37
 
     def _dist(self):
         mix = td.Categorical(logits=self.logits)
@@ -73,10 +73,11 @@ class FlowPrior(nn.Module):
         return td.Independent(td.Normal(loc, scale), 1)
 
     @torch.no_grad()
-    def sample(self, shape):
-        device = self._base_loc.device
-        u = self._base(device).sample(shape)        # (..., M)
-        z, _ = self.flow(u)                         # forward
+    def sample(self, shape, device=None):
+        if device is None:
+            device = self._base_loc.device
+        u = self._base(device).sample(shape)
+        z, _ = self.flow(u)
         return z
 
     def log_prob(self, z):

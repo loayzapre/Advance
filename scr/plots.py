@@ -3,7 +3,7 @@ import os, json
 import matplotlib.pyplot as plt
 
 @torch.no_grad()
-def collect_latents_with_labels(model, data_loader, device, max_batches=100, use_mean=True):
+def collect_latents_with_labels(model, data_loader, device, max_batches=30, use_mean=True):
     """
     Returns:
       Z: (N, M)
@@ -27,15 +27,12 @@ def collect_latents_with_labels(model, data_loader, device, max_batches=100, use
         else:
             z = q.sample()
 
-        Zs.append(z.detach().cpu())
+        Zs.append(z.detach().cpu()) 
         ys.append(y.detach().cpu())
 
     Z = torch.cat(Zs, dim=0)
     y = torch.cat(ys, dim=0)
     return Z, y
-
-import torch
-import matplotlib.pyplot as plt
 
 @torch.no_grad()
 def save_sample_grid(model, path, n=8):

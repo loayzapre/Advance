@@ -20,7 +20,7 @@ def evaluate_test_elbo(model, data_loader, device, n_mc=1):
 
 
 @torch.no_grad()
-def collect_aggregate_posterior(model, data_loader, device, max_batches=100):
+def collect_aggregate_posterior(model, data_loader, device, max_batches=30):
     """
     Collects latent samples from q(z|x) over (up to) max_batches and returns them.
     This approximates the aggregate posterior q(z) = E_data[q(z|x)] by samples.
