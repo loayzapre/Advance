@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#BSUB -J vae_fid
+#BSUB -q hpc
+#BSUB -n 4
+#BSUB -R "rusage[mem=4000]"
+#BSUB -W 00:30
+#BSUB -o logs/fid_%J.out
+#BSUB -e logs/fid_%J.err
+
+set -euo pipefail
+mkdir -p logs
+
+cd /work3/s252608/Advance
+
+PY=/work3/s252608/micromamba/envs/vae_cpu/bin/python
+
+$PY -c "import torch; print('torch ok', torch.__version__)"   # sanity check
+
+$PY calculate_fid.py \
+  --model runs/gaussian_M2/seed0/model.pt \
+  --prior gaussian \
+  --M 2 \
+  --device cpu \
+  --batch-size 64 \
+  --classifier-ckpt mnist_classifier.pth
