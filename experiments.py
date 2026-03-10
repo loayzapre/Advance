@@ -131,7 +131,7 @@ def main():
     
 
     priors = ["gaussian", "mog", "flow"] # gaussian, mog, flow
-    seeds = [0, 1, 2]
+    seeds = [0, 1, 2, 3, 4] # Multiple seeds for better estimates of performance
     M = 2 # Latent dimension, M = 2 for visualization
     epochs = 50
 

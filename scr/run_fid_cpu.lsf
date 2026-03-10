@@ -17,8 +17,8 @@ PY=/work3/s252608/micromamba/envs/vae_cpu/bin/python
 $PY -c "import torch; print('torch ok', torch.__version__)"   # sanity check
 
 $PY calculate_fid.py \
-  --model runs/gaussian_M2/seed0/model.pt \
-  --prior gaussian \
+  --model runs/flow_M2_L4_H218/seed0/model.pt \
+  --prior flow \
   --M 2 \
   --device cpu \
   --batch-size 64 \
